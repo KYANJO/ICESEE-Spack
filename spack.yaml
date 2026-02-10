@@ -8,18 +8,6 @@ spack:
     install_tree:
       root: ./opt/spack
 
-  # packages:
-  #   mpi:
-  #     buildable: false
-  #     providers:
-  #       mpi: [openmpi]
-
-  #   openmpi:
-  #     buildable: false
-  #     externals:
-  #     - spec: openmpi@5.0.7
-  #       prefix: /storage/home/hcoda1/8/bkyanjo3/.icesee-spack/externals/openmpi-5.0.7
-
   specs:
   - python@3.11
   - py-pip

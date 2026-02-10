@@ -2,6 +2,12 @@
 # Copyright (c) 2026 Brian Kyanjo
 set -euo pipefail
 
+PIP_ONLY=0
+for arg in "$@"; do
+  [[ "$arg" == "--pip-only" ]] && PIP_ONLY=1
+done
+
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_DIR="${ROOT}"                         # spack.yaml is in repo root
 CUSTOM_REPO="${ROOT}/icesee-spack"         # contains repo.yaml + packages/
@@ -71,6 +77,7 @@ packages:
       mpi: [openmpi]
 EOF
 
+# if [[ "$PIP_ONLY" -eq 0 ]]; then
 # Avoid ~/.spack conflicts unless user explicitly wants them
 export SPACK_DISABLE_LOCAL_CONFIG="${SPACK_DISABLE_LOCAL_CONFIG:-1}"
 export SPACK_USER_CONFIG_PATH="${SPACK_USER_CONFIG_PATH:-$ROOT/.spack-user-empty}"
@@ -201,11 +208,19 @@ else
 fi
 
 # 10) Regenerate view (safe even if view:false)
-msg "Regenerating view..."
-$SPACK_CMD -e "${ENV_DIR}" view regenerate || true
+# msg "Regenerating view..."
+# $SPACK_CMD -e "${ENV_DIR}" view regenerate || true
+msg "Skipping Spack view (view: false)."
+# fi
 
 # 11) Use env python WITHOUT requiring shell activation
 PYTHON="$($SPACK_CMD -e "${ENV_DIR}" location -i python)/bin/python"
+msg "Ensuring pip is available in Spack Python..."
+"$PYTHON" -m pip --version >/dev/null 2>&1 || {
+  msg "pip missing; bootstrapping via ensurepip..."
+  "$PYTHON" -m ensurepip --upgrade || true
+  "$PYTHON" -m pip install --upgrade pip setuptools wheel
+}
 [[ -x "${PYTHON}" ]] || die "Could not locate env python via Spack"
 
 # 12) Generate pip-only requirements from ICESEE/pyproject.toml and install them
