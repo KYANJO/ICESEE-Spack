@@ -7,10 +7,17 @@ for arg in "$@"; do
   [[ "$arg" == "--pip-only" ]] && PIP_ONLY=1
 done
 
+WITH_ISSM=0
+for arg in "$@"; do
+  [[ "$arg" == "--with-issm" ]] && WITH_ISSM=1
+done
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ENV_DIR="${ROOT}"                         # spack.yaml is in repo root
-CUSTOM_REPO="${ROOT}/icesee-spack"         # contains repo.yaml + packages/
+# ENV_DIR="${ROOT}"                         # spack.yaml is in repo root
+ENV_DIR="${ROOT}/.spack-env/icesee"
+# CUSTOM_REPO="${ROOT}/icesee-spack"         # contains repo.yaml + packages/
+CUSTOM_REPO_REL="${ROOT}/icesee-spack"
+CUSTOM_REPO="$(cd "${CUSTOM_REPO_REL}" && pwd)"   # ABSOLUTE path
 ICESEE_SUBMODULE="${ROOT}/ICESEE"          # pinned ICESEE source (optional)
 JOBS="${JOBS:-8}"
 
@@ -18,22 +25,22 @@ msg(){ echo "[ICESEE-Spack] $*"; }
 die(){ echo "[ICESEE-Spack][ERROR] $*" >&2; exit 1; }
 
 # ---- user-configurable install prefix (NO hardcoded cluster paths) ----
-ICESEE_SPACK_PREFIX="${ICESEE_SPACK_PREFIX:-$HOME/.icesee-spack/opt/spack}"
-ICESEE_SPACK_CACHE="${ICESEE_SPACK_CACHE:-$HOME/.icesee-spack/cache}"
+ICESEE_SPACK_PREFIX="${ICESEE_SPACK_PREFIX:-$ROOT/.icesee-spack/opt/spack}"
+ICESEE_SPACK_CACHE="${ICESEE_SPACK_CACHE:-$ROOT/.icesee-spack/cache}"
 
 # GCC + OpenMPI build knobs (can be overridden by environment variables)
 WANT_GCC="${WANT_GCC:-13}"
 MODULE_GCC="${MODULE_GCC:-gcc/${WANT_GCC}}"
 OPENMPI_VERSION="${OPENMPI_VERSION:-5.0.7}"
-OPENMPI_PREFIX="${OPENMPI_PREFIX:-$HOME/.icesee-spack/externals/openmpi-${OPENMPI_VERSION}}"
+OPENMPI_PREFIX="${OPENMPI_PREFIX:-$ROOT/.icesee-spack/externals/openmpi-${OPENMPI_VERSION}}"
 SLURM_DIR="${SLURM_DIR:-}"
 PMIX_DIR="${PMIX_DIR:-}"
-ICESEE_EXTERNALS_ROOT="${ICESEE_EXTERNALS_ROOT:-$HOME/.icesee-spack/externals}"
+ICESEE_EXTERNALS_ROOT="${ICESEE_EXTERNALS_ROOT:-$ROOT/.icesee-spack/externals}"
 OPENMPI_PREFIX="${OPENMPI_PREFIX:-$ICESEE_EXTERNALS_ROOT/openmpi-${OPENMPI_VERSION}}"
 
 # ---- after OpenMPI is built/ensured ----
 OPENMPI_VERSION="${OPENMPI_VERSION:-5.0.7}"
-ICESEE_EXTERNALS_ROOT="${ICESEE_EXTERNALS_ROOT:-$HOME/.icesee-spack/externals}"
+ICESEE_EXTERNALS_ROOT="${ICESEE_EXTERNALS_ROOT:-$ROOT/.icesee-spack/externals}"
 OPENMPI_PREFIX="${OPENMPI_PREFIX:-$ICESEE_EXTERNALS_ROOT/openmpi-${OPENMPI_VERSION}}"
 
 # detect actual compiler used for your environment (gcc path/version)
@@ -44,7 +51,14 @@ GCC_SPEC="gcc@${GCC_VER}"
 msg "Registering OpenMPI external (env-scoped) ..."
 mkdir -p "${ENV_DIR}/spack"
 
-cat > "${ENV_DIR}/spack/packages.yaml" <<EOF
+msg "Registering OpenMPI external (env-scoped) ..."
+
+ENV_CFG_DIR="${ENV_DIR}/spack"
+mkdir -p "${ENV_CFG_DIR}"
+
+ENV_PACKAGES_YAML="${ENV_CFG_DIR}/packages.yaml"
+
+cat > "${ENV_PACKAGES_YAML}" <<EOF
 packages:
   mpi:
     buildable: false
@@ -58,9 +72,11 @@ packages:
       prefix: ${OPENMPI_PREFIX}
 EOF
 
-msg "Wrote ${ENV_DIR}/spack/packages.yaml:"
-sed -n '1,120p' "${ENV_DIR}/spack/packages.yaml"
-
+# hard check + debug print
+[[ -f "${ENV_PACKAGES_YAML}" ]] || die "packages.yaml was not created at ${ENV_PACKAGES_YAML}"
+msg "Wrote ${ENV_PACKAGES_YAML}:"
+ls -l "${ENV_PACKAGES_YAML}"
+sed -n '1,120p' "${ENV_PACKAGES_YAML}"
 mkdir -p "${ROOT}/spack"
 
 cat > "${ROOT}/spack/packages.yaml" <<EOF
@@ -106,6 +122,11 @@ fi
 # Prefer not to inherit random local config unless user wants it
 SPACK_CMD="${SPACK_BIN} --no-local-config"
 
+mkdir -p "${ENV_DIR}"
+
+# Copy the repo-root spack.yaml into the environment dir (source of truth stays in repo)
+cp -f "${ROOT}/spack.yaml" "${ENV_DIR}/spack.yaml"
+
 # 2) Ensure required repo/env files exist
 [[ -f "${ENV_DIR}/spack.yaml" ]] || die "spack.yaml not found at ${ENV_DIR}/spack.yaml"
 [[ -f "${CUSTOM_REPO}/repo.yaml" ]] || die "repo.yaml not found at ${CUSTOM_REPO}/repo.yaml"
@@ -133,6 +154,8 @@ if have_cmd module; then
     module load "${MODULE_GCC}"
   else
     msg "Module ${MODULE_GCC} not available"
+    # load general gcc for spack install gcc@${WANT_GCC} (if available); if not, spack will build it from source
+    module load gcc || msg "No gcc module available; relying on system compiler for Spack builds (may fail if too old)"
   fi
 fi
 
@@ -141,15 +164,17 @@ if [[ "${gcc_major}" -lt "${WANT_GCC}" ]]; then
   msg "gcc>=${WANT_GCC} not found (current major=${gcc_major}). Installing gcc@${WANT_GCC} via Spack..."
 
   # Find compilers in isolated config scope (does NOT need env scope)
-  $SPACK_CMD compiler find --scope user || true
+  # $SPACK_CMD compiler find --scope user || true
+  $SPACK_CMD compiler find || true
 
-  if ! $SPACK_CMD find -q "gcc@${WANT_GCC}"; then
+  if ! $SPACK_CMD find "gcc@${WANT_GCC}" 2>/dev/null | grep -q "gcc@${WANT_GCC}"; then
     $SPACK_CMD install -j "${JOBS}" "gcc@${WANT_GCC}"
   fi
 
   # Load installed gcc so subsequent builds use it
   $SPACK_CMD load "gcc@${WANT_GCC}"
-  $SPACK_CMD compiler find --scope user || true
+  # $SPACK_CMD compiler find --scope user || true
+  $SPACK_CMD compiler find || true
 fi
 
 have_cmd gcc || die "gcc not found after attempting module/spack setup"
@@ -158,12 +183,28 @@ have_cmd gfortran || die "gfortran not found after attempting module/spack setup
 msg "Using gcc: $(command -v gcc) ($(gcc --version | head -n1))"
 
 # 5) Add custom Spack repo (idempotent)
-msg "Adding custom Spack repo..."
-$SPACK_CMD -e "${ENV_DIR}" repo add "${CUSTOM_REPO}" || true
+# msg "Adding custom Spack repo..."
+# $SPACK_CMD -e "${ENV_DIR}" repo add "${CUSTOM_REPO}" || true
+msg "Adding custom Spack repo (absolute path, env-scoped)..."
+
+# Remove stale mapping if it exists (especially if it was ./icesee-spack)
+$SPACK_CMD -e "${ENV_DIR}" config rm repos:icesee >/dev/null 2>&1 || true
+
+# Add repo with absolute path (this creates repos: {icesee: /abs/path})
+$SPACK_CMD -e "${ENV_DIR}" repo add "${CUSTOM_REPO}"
+
+# Sanity check: Spack can see the repo.yaml
+if ! $SPACK_CMD -e "${ENV_DIR}" config get repos | grep -q "${CUSTOM_REPO}"; then
+  msg "WARNING: repo path not showing as absolute in env config. Dumping repos:"
+  $SPACK_CMD -e "${ENV_DIR}" config get repos
+  die "Custom repo registration failed (expected absolute path)."
+fi
 
 # 6) Ensure OpenMPI exists at OPENMPI_PREFIX (build if missing)
 msg "Ensuring OpenMPI ${OPENMPI_VERSION} at ${OPENMPI_PREFIX}..."
 export OPENMPI_VERSION OPENMPI_PREFIX JOBS MODULE_GCC SLURM_DIR PMIX_DIR
+export SPACK_CMD="$SPACK_CMD"        # you already have it
+export SPACK_GCC_SPEC="gcc@${WANT_GCC}"
 "${ROOT}/scripts/build_openmpi.sh"
 
 # 7) Register OpenMPI as a Spack external for THIS environment (so concretize stops failing)
@@ -190,6 +231,14 @@ packages:
 EOF
 
 # 8) Concretize + install
+msg "Checking custom package is visible (py-icesee)..."
+$SPACK_CMD -e "${ENV_DIR}" info py-icesee >/dev/null 2>&1 || {
+  msg "Repo list:"
+  $SPACK_CMD -e "${ENV_DIR}" repo list
+  msg "Repos config:"
+  $SPACK_CMD -e "${ENV_DIR}" config get repos
+  die "py-icesee not visible to Spack (repo.yaml/path problem)."
+}
 msg "Concretizing..."
 $SPACK_CMD -e "${ENV_DIR}" concretize -f
 
@@ -241,11 +290,35 @@ else
   msg "WARNING: ${PYPROJECT} not found; skipping pip-only dependency generation."
 fi
 
+# 12.1)
+if [[ "${WITH_ISSM}" -eq 1 ]]; then
+  msg "Installing ISSM (--with-issm enabled)..."
+  export ICESEE_EXTERNALS_ROOT="${ICESEE_EXTERNALS_ROOT:-$ROOT/.icesee-spack/externals}"
+  export ISSM_PREFIX="${ISSM_PREFIX:-$ICESEE_EXTERNALS_ROOT/ISSM}"
+  export MODULE_GCC="${MODULE_GCC:-gcc/${WANT_GCC:-13}}"
+  export MODULE_MATLAB="${MODULE_MATLAB:-matlab}"
+  # MATLABROOT should come from module load; user can also export it manually
+  # "${ROOT}/scripts/build_issm.sh"
+  # bash "${ROOT}/scripts/build_issm.sh" "${OPENMPI_PREFIX}"
+  ISSM_DIR="${ISSM_DIR:-$ICESEE_EXTERNALS_ROOT/ISSM}"
+  export ISSM_DIR
+  export OPENMPI_PREFIX
+  bash "${ROOT}/scripts/build_issm.sh"
+else
+  msg "Skipping ISSM install (use --with-issm to enable)."
+fi
+
+
 # 13) Smoke tests
 msg "Running smoke tests..."
 # Keep your existing behavior: if scripts/test.sh is a shell script, run via bash
 if [[ -f "${ROOT}/scripts/test.sh" ]]; then
+  msg "Running ${ROOT}/scripts/test.sh... to test Spack environment and py-icesee installation"
   bash "${ROOT}/scripts/test.sh"
+  if [[ "$WITH_ISSM" -eq 1 ]]; then
+    msg "Running ${ROOT}/scripts/test_issm.sh... to test ISSM installation (if --with-issm enabled)"
+    bash "${ROOT}/scripts/test_issm.sh"
+  fi
 else
   msg "WARNING: scripts/test.sh not found; skipping tests."
 fi
@@ -255,3 +328,4 @@ msg "Prefix: ${ICESEE_SPACK_PREFIX}"
 msg "OpenMPI: ${OPENMPI_PREFIX}"
 msg "To use the environment:"
 msg "  eval \"\$(${SPACK_BIN} -e ${ENV_DIR} env activate --sh)\""
+
