@@ -4,9 +4,9 @@ spack:
   concretizer:
     unify: when_possible
 
-  # config:
-  #   install_tree:
-  #     root: ./opt/spack
+  config:
+    install_tree:
+      root: ./opt/spack
 
   specs:
   - python@3.11
@@ -14,10 +14,17 @@ spack:
   - py-setuptools
   - py-pkgconfig
   - py-wheel
+  - py-numpy@1.26.4
 
   - hdf5@1.14.5 +mpi
   - py-h5py@3.12.1 +mpi
   - py-icesee
+
+  # firedrake dependencies
+  # - py-cython
+  # - ninja
+  # - pkgconf
+  # - py-petsc4py
 
   repos:
     icesee: ./icesee-spack

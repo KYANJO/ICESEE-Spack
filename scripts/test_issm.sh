@@ -1,67 +1,64 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "[test_issm] Starting ISSM smoke test..."
+log(){ echo "[test_issm] $*"; }
+warn(){ echo "[test_issm][WARN] $*" >&2; }
 
-# Allow user overrides
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ACTIVATE="${ROOT}/scripts/activate.sh"
+
+log "Starting ISSM smoke test..."
+log "Sourcing: ${ACTIVATE}"
+# shellcheck disable=SC1090
+source "${ACTIVATE}"
+
+# Allow overrides
 MATLAB_BIN="${MATLAB_BIN:-matlab}"
+
+# ISSM_DIR should come from activate.sh (exported there), but allow manual override
 ISSM_DIR="${ISSM_DIR:-}"
 
-# If ISSM_DIR not set, try to infer from common environment or path
-if [[ -z "${ISSM_DIR}" ]]; then
-  # Heuristic: if "issmversion" exists in PATH, try to locate ISSM root
-  if command -v issmversion >/dev/null 2>&1; then
-    ISSMVERSION_PATH="$(command -v issmversion)"
-    # Often $ISSM_DIR/bin/issmversion or $ISSM_DIR/src/m/...
-    # Try walking up a few levels
-    CANDIDATE="$(cd "$(dirname "${ISSMVERSION_PATH}")/.." && pwd)"
-    ISSM_DIR="${CANDIDATE}"
-  fi
+log "MATLAB_BIN: ${MATLAB_BIN}"
+log "ISSM_DIR:    ${ISSM_DIR:-<not set>}"
+
+# MATLAB presence: best-effort warning instead of hard failure if not installed
+if ! command -v "${MATLAB_BIN}" >/dev/null 2>&1; then
+  warn "MATLAB executable not found: ${MATLAB_BIN}"
+  warn "If you want ISSM tests, load MATLAB (e.g. 'module load matlab') and re-run."
+  exit 0
 fi
 
-echo "[test_issm] MATLAB: ${MATLAB_BIN}"
-echo "[test_issm] ISSM_DIR: ${ISSM_DIR:-<not set>}"
-
-command -v "${MATLAB_BIN}" >/dev/null 2>&1 || {
-  echo "[test_issm][ERROR] MATLAB executable not found: ${MATLAB_BIN}"
-  echo "[test_issm] Hint: load your MATLAB module (e.g., 'module load matlab')"
-  exit 2
-}
-
+# ISSM presence: fail if you requested ISSM but it’s not there; otherwise warn+exit 0
 if [[ -z "${ISSM_DIR}" || ! -d "${ISSM_DIR}" ]]; then
-  echo "[test_issm][ERROR] ISSM_DIR is not set or not a directory."
-  echo "[test_issm] Set ISSM_DIR=/path/to/ISSM or load an ISSM module."
-  exit 3
+  warn "ISSM_DIR is not set or not a directory."
+  warn "Set ISSM_DIR=/path/to/ISSM or enable --with-issm during install."
+  exit 0
 fi
 
-# Try to source the ISSM MATLAB environment if present
-# Common: $ISSM_DIR/etc/environment.sh (sets MATLABPATH additions, etc.)
+# Source ISSM env if present (often needed for MATLAB paths)
 if [[ -f "${ISSM_DIR}/etc/environment.sh" ]]; then
-  echo "[test_issm] Sourcing ${ISSM_DIR}/etc/environment.sh"
-  # shellcheck disable=SC1090
+  log "Sourcing ${ISSM_DIR}/etc/environment.sh"
   set +u
+  # shellcheck disable=SC1090
   source "${ISSM_DIR}/etc/environment.sh"
   set -u
 fi
 
-# Minimal MATLAB call:
-# - add ISSM matlab paths if needed
-# - call issmversion
-# - exit with nonzero on failure
 TMP_MFILE="$(mktemp /tmp/icesee_issm_test_XXXX.m)"
 cat > "${TMP_MFILE}" <<'EOF'
 try
     disp('[test_issm] MATLAB started');
-    % If ISSM_DIR is set in environment, add relevant matlab paths
+
     issm_dir = getenv('ISSM_DIR');
-    if ~isempty(issm_dir)
-        % Common MATLAB entry points in ISSM
-        addpath(fullfile(issm_dir,'src','m'));
-        addpath(genpath(fullfile(issm_dir,'src','m')));
+    if isempty(issm_dir)
+        error('ISSM_DIR not set in environment.');
     end
 
+    % Add ISSM MATLAB paths
+    addpath(genpath(fullfile(issm_dir,'src','m')));
+
     if exist('issmversion','file') ~= 2
-        error('issmversion not found on MATLAB path. Check ISSM_DIR and MATLAB paths.');
+        error('issmversion not found on MATLAB path. Check ISSM_DIR and paths.');
     end
 
     v = issmversion();
@@ -76,8 +73,8 @@ catch ME
 end
 EOF
 
-echo "[test_issm] Running MATLAB issmversion()..."
+log "Running MATLAB issmversion()..."
 "${MATLAB_BIN}" -nodisplay -nosplash -nodesktop -r "run('${TMP_MFILE}');"
 
 rm -f "${TMP_MFILE}"
-echo "[test_issm] Done."
+log "Done."

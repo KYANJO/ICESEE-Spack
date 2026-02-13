@@ -90,23 +90,44 @@ fi
 CA_BUNDLE="${CA_BUNDLE:-}"
 
 # ------------------------
-# Modules (best-effort)
+# Modules
 # ------------------------
 if command -v module >/dev/null 2>&1; then
+  # Make sure module function is initialized in non-interactive shells
+  # shellcheck disable=SC1091
+  source /etc/profile.d/modules.sh 2>/dev/null || true
+
+  log "Sanitizing module environment (module purge)..."
+  module purge || true
+
   # GCC
   if module -t avail 2>&1 | grep -qx "${MODULE_GCC}"; then
     log "Loading module ${MODULE_GCC}"
-    module load "${MODULE_GCC}"
+    module load "${MODULE_GCC}" || log "WARNING: module load ${MODULE_GCC} failed (continuing)"
   else
     log "Module ${MODULE_GCC} not available (continuing)"
   fi
 
-  # MATLAB
+  # MATLAB (robust)
+  matlab_loaded=0
+
+  # 1) Try configured name if listed
   if module -t avail 2>&1 | grep -qx "${MODULE_MATLAB}"; then
     log "Loading module ${MODULE_MATLAB}"
-    module load "${MODULE_MATLAB}"
+    module load "${MODULE_MATLAB}" && matlab_loaded=1 || true
   else
-    log "Module ${MODULE_MATLAB} not available (continuing)"
+    log "Module ${MODULE_MATLAB} not listed by 'module avail'"
+  fi
+
+  # 2) Fallback: try generic "matlab" regardless of listing
+  if [[ "${matlab_loaded}" -eq 0 ]]; then
+    log "Trying fallback: module load matlab"
+    module load matlab && matlab_loaded=1 || true
+  fi
+
+  # 3) Optional: if still not loaded, show a hint
+  if [[ "${matlab_loaded}" -eq 0 ]]; then
+    log "WARNING: Could not load MATLAB via modules (${MODULE_MATLAB} or matlab)."
   fi
 else
   log "No module command found; relying on environment PATH"
@@ -120,6 +141,17 @@ command -v g++ >/dev/null 2>&1 || die "g++ not found"
 command -v gfortran >/dev/null 2>&1 || die "gfortran not found"
 command -v git >/dev/null 2>&1 || die "git not found"
 command -v make >/dev/null 2>&1 || die "make not found"
+
+# Force libstdc++ from the active g++ (prevents picking gcc/12 libstdc++ by accident)
+GXX_BIN="$(command -v g++)"
+LIBSTDCXX_SO="$("$GXX_BIN" -print-file-name=libstdc++.so)"
+GCC_LIBDIR="$(cd "$(dirname "$LIBSTDCXX_SO")" && pwd)"
+
+export LD_LIBRARY_PATH="${GCC_LIBDIR}:${LD_LIBRARY_PATH:-}"
+export LIBRARY_PATH="${GCC_LIBDIR}:${LIBRARY_PATH:-}"
+export LDFLAGS="${LDFLAGS:-} -Wl,-rpath,${GCC_LIBDIR}"
+
+log "Pinned GCC lib dir: ${GCC_LIBDIR}"
 
 # autoreconf may be provided by ISSM autotools externalpackage; we'll check later as needed.
 
@@ -182,6 +214,12 @@ fi
 
 cd "${ISSM_PREFIX}"
 
+# add spack gcc to path for first selection
+# export PATH="$(spack location -i gcc)/bin:${PATH}"
+# module purge || true
+# # module unload mvapich2 || true
+# module load matlab || true
+
 # ------------------------
 # Build external packages (idempotent)
 # ------------------------
@@ -196,6 +234,7 @@ if [[ "${BUILD_AUTOTOOLS}" == "1" ]]; then
   else
     log "Installing ISSM externalpackages/autotools..."
     cd "${ISSM_PREFIX}/externalpackages/autotools"
+
     ./install-linux.sh
   fi
 fi
