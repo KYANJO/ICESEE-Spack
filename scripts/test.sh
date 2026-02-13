@@ -81,7 +81,7 @@ fi
 
 # icesee (prefer lowercase)
 if _py_run "icesee import" \
-'import icesee
+'import ICESEE
 print("[py] icesee OK:", getattr(icesee, "__file__", "<no __file__>"))'
 then
   true
