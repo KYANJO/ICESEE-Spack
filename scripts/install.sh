@@ -249,7 +249,13 @@ fi
 # firedrake install (PETSc only, no python deps)
 if [[ "${WITH_FIREDRAKE}" -eq 1 ]]; then
   msg "Installing Firedrake into Spack Python (no venv)..."
+  source "${ROOT}/spack/share/spack/setup-env.sh"
+  spack env activate -d "${ENV_DIR}"
 
+  # Put external OpenMPI first (so mpicc/mpirun exist)
+  export MODULE_GCC="${MODULE_GCC:-gcc/${WANT_GCC:-13}}"
+  export PATH="${OPENMPI_PREFIX}/bin:${PATH}"
+  export LD_LIBRARY_PATH="${OPENMPI_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
   # (Optional) constraints file to keep Firedrake tooling stable
   CONSTRAINTS="${ROOT}/requirements/firedrake-constraints.txt"
 cat > "${CONSTRAINTS}" <<EOF
@@ -257,18 +263,41 @@ setuptools<81
 numpy<2
 EOF
 
-  export OPENMPI_PREFIX="${OPENMPI_PREFIX}"   # already set in your install.sh
-  export PIP_CONSTRAINT="${CONSTRAINTS}"
-
-  # install external petsc for firedrake
-  bash "${ROOT}/scripts/build_firedrake.sh"
-
-  # If you have external PETSc, export it here:
-  export PETSC_DIR="${ICESEE_EXTERNALS_ROOT}/petsc-v3.24.0"
-  export PETSC_ARCH="arch-firedrake-default"
+  # "$PYTHON" "${ROOT}/scripts/install_firedrake.py"
+  module purge || true
+  export MODULE_GCC="${MODULE_GCC:-gcc/${WANT_GCC:-13}}"
+  export OPENMPI_PREFIX
+    PETSC_DIR="$(spack -e "${ENV_DIR}" location -i petsc)"
+  export PETSC_DIR
+  unset PETSC_ARCH
+  # export PETSC_ARCH="arch-firedrake-default"
   export HDF5_MPI=ON
 
-  "$PYTHON" "${ROOT}/scripts/install_firedrake.py"
+  #   # Get Spack's MPI wrappers (the ones PETSc was built with)
+  MPICC="$(spack -e "${ENV_DIR}" location -i openmpi)/bin/mpicc"
+  MPICXX="$(spack -e "${ENV_DIR}" location -i openmpi)/bin/mpicxx"
+  MPIFC="$(spack -e "${ENV_DIR}" location -i openmpi)/bin/mpifort"
+
+  MPI_DIR="$(spack -e "${ENV_DIR}" location -i openmpi)"
+  export PATH="${MPI_DIR}/bin:${PATH}"
+  export LD_LIBRARY_PATH="${MPI_DIR}/lib:${LD_LIBRARY_PATH:-}"
+
+  export CC="${MPICC}"
+  export CXX="${MPICXX}"
+  export FC="${MPIFC}"
+  export MPICC MPICXX MPIFC
+  export OMP_NUM_THREADS=1
+
+  msg "Using mpicc: ${MPICC}"
+  "${MPICC}" --showme:compile || true
+
+  "$PYTHON" -m venv venv-firedrake
+  source venv-firedrake/bin/activate
+  "$PYTHON" -m pip cache purge
+  # export $("$PYTHON" firedrake-configure --show-env)
+  echo 'setuptools<81' > constraints.txt
+  export PIP_CONSTRAINT=constraints.txt
+  "$PYTHON" -m pip install "firedrake[check]"
 else
   msg "Skipping Firedrake install (use --with-firedrake to enable)."
 fi

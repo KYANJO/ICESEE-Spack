@@ -105,7 +105,7 @@ info "PYTHONPATH: ${PYTHONPATH:-<empty>}"
 #   # load_if_present "${s}" || true
 #   try_load "${s}" || true
 # done
-spack load py-pip py-setuptools py-wheel py-pkgconfig py-numpy py-h5py py-icesee || warn "Failed to load some core python packages (continuing)"
+spack load py-pip py-setuptools py-wheel py-pkgconfig py-numpy py-h5py py-icesee py-cython py-petsc4py || warn "Failed to load some core python packages (continuing)"
 
 # Load only installed py-* packages from the environment (generic)
 # for spec in $("${SPACK_EXE}" -e "${ENV_DIR}" find --format "{name}" 2>/dev/null); do
@@ -131,6 +131,7 @@ fi
 
 # DEV: allow importing the in-repo ICESEE package (repo root contains ICESEE/)
 export PYTHONPATH="${ROOT}:${PYTHONPATH:-}"
+export OMP_NUM_THREADS=1
 
 info "Activated env at: ${ENV_DIR}"
 echo "  spack   : ${SPACK_EXE}"

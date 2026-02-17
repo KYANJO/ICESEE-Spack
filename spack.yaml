@@ -21,10 +21,14 @@ spack:
   - py-icesee
 
   # firedrake dependencies
-  # - py-cython
-  # - ninja
-  # - pkgconf
+  - py-cython
+  - ninja
+  - pkgconf
   # - py-petsc4py
+
+  # install petsc v3.24.0 with spack
+  - petsc@3.24.0 +mpi +shared +fortran ~fortran-bindings +mumps +hypre +metis +ptscotch +superlu-dist +suite-sparse +hdf5 +scalapack +fftw +hwloc ^hdf5+mpi ^fftw+mpi
+  - py-petsc4py ^petsc@3.24.0
 
   repos:
     icesee: ./icesee-spack
