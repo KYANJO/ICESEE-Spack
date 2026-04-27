@@ -30,6 +30,10 @@ ICESEE_SUBMODULE="${ROOT}/ICESEE"
 #fi
 JOBS=24
 
+SETUPTOOLS_CONSTRAINT="${SETUPTOOLS_CONSTRAINT:-setuptools<81}"
+NUMPY_CONSTRAINT="${NUMPY_CONSTRAINT:-numpy<2}"
+PETSC4PY_CONSTRAINT="${PETSC4PY_CONSTRAINT:-petsc4py==3.24.0}"
+
 msg(){ echo "[ICESEE-Spack] $*"; }
 die(){ echo "[ICESEE-Spack][ERROR] $*" >&2; exit 1; }
 have_cmd(){ command -v "$1" >/dev/null 2>&1; }
@@ -218,7 +222,8 @@ msg "Ensuring pip is available in Spack Python..."
 "$PYTHON" -m pip --version >/dev/null 2>&1 || {
   msg "pip missing; bootstrapping via ensurepip..."
   "$PYTHON" -m ensurepip --upgrade || true
-  "$PYTHON" -m pip install --upgrade pip setuptools wheel
+  "$PYTHON" -m pip install --upgrade pip wheel
+  "$PYTHON" -m pip install "${SETUPTOOLS_CONSTRAINT}"
 }
 
 # Generate pip-only requirements from ICESEE/pyproject.toml and install them
@@ -233,7 +238,8 @@ if [[ -f "${PYPROJECT}" ]]; then
     --extras "mpi,viz"
 
   msg "Installing pip-only deps..."
-  "$PYTHON" -m pip install -U pip setuptools wheel
+  "$PYTHON" -m pip install -U pip wheel
+  "$PYTHON" -m pip install "${SETUPTOOLS_CONSTRAINT}" "${NUMPY_CONSTRAINT}"
   "$PYTHON" -m pip install --no-cache-dir -r "${PIP_REQS}"
   # DEV: allow importing the in-repo ICESEE package (repo root contains ICESEE/)
   export PYTHONPATH="${ROOT}:${PYTHONPATH:-}"
@@ -334,10 +340,17 @@ EOF
   msg "Using mpicc: ${MPICC}"
   "${MPICC}" --showme:compile || true
 
-  "$PYTHON" -m venv --system-site-packages venv-firedrake
-  source venv-firedrake/bin/activate
-
+  FIREDRAKE_VENV="${ROOT}/venv-firedrake"
+  
+  "$PYTHON" -m venv --system-site-packages "${FIREDRAKE_VENV}"
+  source "${FIREDRAKE_VENV}/bin/activate"
+  
+  # IMPORTANT: after activating the venv, reset PYTHON to the venv python
+  PYTHON="${FIREDRAKE_VENV}/bin/python"
+  
   "$PYTHON" -m pip cache purge
+  "$PYTHON" -m pip install -U pip wheel
+  "$PYTHON" -m pip install "${SETUPTOOLS_CONSTRAINT}" "${NUMPY_CONSTRAINT}"
 
   cat > constraints.txt <<EOF
 setuptools<81
@@ -349,7 +362,8 @@ EOF
   FIREDRAKE_VERSION="${FIREDRAKE_VERSION:-2025.10.2}"
   msg "Installing Firedrake ${FIREDRAKE_VERSION}"
   #  install firedrake
-  "$PYTHON" -m pip install "firedrake[check]==${FIREDRAKE_VERSION}"
+  # "$PYTHON" -m pip install "firedrake[check]==${FIREDRAKE_VERSION}"
+  "$PYTHON" -m pip install --no-build-isolation "firedrake[check]==${FIREDRAKE_VERSION}"
 else
   msg "Skipping Firedrake install (use --with-firedrake to enable)."
 fi
@@ -363,10 +377,13 @@ if [[ "${WITH_ICEPACK}" -eq 1 ]]; then
   spack env activate -d "${ENV_DIR}"
 
   # source firedrake venv to get deps + env vars
-  source "${ROOT}/venv-firedrake/bin/activate"
+  FIREDRAKE_VENV="${ROOT}/venv-firedrake"
+  source "${FIREDRAKE_VENV}/bin/activate"
+  PYTHON="${FIREDRAKE_VENV}/bin/python"
   export OMP_NUM_THREADS=1
 
   # install patchelf
+  "$PYTHON" -m pip install "${SETUPTOOLS_CONSTRAINT}" "${NUMPY_CONSTRAINT}"
   "$PYTHON" -m pip install patchelf
 
   # clone icepack repo if icepack is missing (uses main branch by default)
