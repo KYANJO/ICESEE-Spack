@@ -89,6 +89,10 @@ mkdir -p "${ENV_CFG_DIR}"
 [[ -f "${ROOT}/spack.yaml" ]] || die "spack.yaml not found at ${ROOT}/spack.yaml"
 cp -f "${ROOT}/spack.yaml" "${ENV_DIR}/spack.yaml"
 
+# Fix repo path inside copied env spack.yaml.
+# Relative paths in spack.yaml are interpreted relative to ENV_DIR, not ROOT.
+sed -i.bak "s|icesee: ./icesee-spack|icesee: ${CUSTOM_REPO}|g" "${ENV_DIR}/spack.yaml"
+
 # 3) Ensure required repo/env files exist
 [[ -f "${ENV_DIR}/spack.yaml" ]] || die "spack.yaml not found at ${ENV_DIR}/spack.yaml"
 [[ -f "${CUSTOM_REPO}/repo.yaml" ]] || die "repo.yaml not found at ${CUSTOM_REPO}/repo.yaml"
